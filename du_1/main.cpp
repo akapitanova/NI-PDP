@@ -140,18 +140,19 @@ private:
         // volani rekurze
 
         // left son
-        std::vector<int> X_vertices_left = X_vertices;
-        X_vertices_left[vertex] = 0;
-        int price_left = get_weights_sum(X_vertices_left);
+        //std::vector<int> X_vertices_left = X_vertices;
+        X_vertices[vertex] = 0;
+        int price_left = get_weights_sum(X_vertices);
 
-        solve(vertex + 1, X_vertices_left, ones, price_left);
+        solve(vertex + 1, X_vertices, ones, price_left);
 
         //int vertex_right = vertex + 1;
-        std::vector<int> X_vertices_right = X_vertices;
-        X_vertices_right[vertex] = 1;
-        int price_right = get_weights_sum(X_vertices_right);
+        //std::vector<int> X_vertices_right = X_vertices;
+        X_vertices[vertex] = 1;
+        int price_right = get_weights_sum(X_vertices);
 
-        solve(vertex + 1, X_vertices_right, ones + 1, price_right);
+        solve(vertex + 1, X_vertices, ones + 1, price_right);
+        X_vertices[vertex] = -1;
     }
 
 };
@@ -223,21 +224,13 @@ int main() {
 
     std::string file_name = "graf_30_10.txt";
     Graph* graph = load_data(dir_path, file_name, 10);
+    if (!graph){
+        return 1;
+    }
 
     graph->make_min_edge_cut();
     std::cout << "solution " << graph->get_best_sol() << std::endl;
     std::cout << "best price " << graph->get_best_price() << std::endl;
     std::cout << "total calls " << graph->get_calls() << std::endl;
 
-
-    /*
-    std::string file_name_1 = "graf_20_7.txt";
-    Graph* graph_1 = load_data(dir_path, file_name_1, 10);
-    Solution first_solution_1 = Solution(graph_1->get_n());
-    graph_1->solve(&first_solution_1);
-    //std::cout << graph->get_best_sol() << std::endl;
-    std::cout << "best price " << graph_1->get_best_price() << std::endl;
-    std::cout << "total calls " << graph_1->get_calls() << std::endl;
-    return 0;
-     */
 }
