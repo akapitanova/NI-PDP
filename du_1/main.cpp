@@ -62,6 +62,20 @@ public:
         solve(0, X_vertices, 0, 0);
     }
 
+    void print_final_weights(std::vector<int> X_vertices){
+
+        for (int row = 0; row < n; row++){
+            for (int column = row + 1; column < n; column++){
+                if ((X_vertices[row] == 1 and X_vertices[column] == 0)
+                    or (X_vertices[row] == 0 and X_vertices[column] == 1)){
+                    if (edges_w[row][column] != 0) {
+                        std::cout << "(" << row << ", " << column << ") " << edges_w[row][column] << std::endl;
+                    }
+                }
+            }
+        }
+    }
+
 private:
     std::vector<int> init_X_vertices(){
         std::vector<int> X_vertices;
@@ -117,6 +131,9 @@ private:
     void solve(int vertex, std::vector<int>& X_vertices, int ones, int price){
         calls += 1;
 
+        if (vertex - ones > n - a){
+            return;
+        }
         if (ones > a){
             return;
         }
@@ -146,7 +163,7 @@ private:
 
         solve(vertex + 1, X_vertices, ones, price_left);
 
-        //int vertex_right = vertex + 1;
+        // right son
         //std::vector<int> X_vertices_right = X_vertices;
         X_vertices[vertex] = 1;
         int price_right = get_weights_sum(X_vertices);
@@ -179,7 +196,6 @@ Graph* load_data(std::string& dir_path, std::string& file_name, int a){
         return nullptr;
 
     std::vector<std::vector<int>> edges_w;
-    std::cout << dir_path + file_name << std::endl;
     std::ifstream data(dir_path + file_name, std::ios::in);
     if (!data.is_open()) {
         return nullptr;
@@ -211,26 +227,49 @@ std::ostream & operator<< (std::ostream& os, std::vector<int> solution)
     for (int i = 0; i < n; i++){
         os << solution[i] << " ";
     }
+    os << std::endl;
 
+    os << "X vertices: ";
+    for (int i = 0; i < n; i++){
+        if (solution[i]){
+            os << i << " ";
+        }
+    }
+    os << std::endl;
+
+    os << "Y vertices: ";
+    for (int i = 0; i < n; i++){
+        if (!solution[i]){
+            os << i << " ";
+        }
+    }
     return os;
 }
 
 
 
-int main() {
+int main(int argc, char * argv[]) {
 
-    std::string dir_path = "/home/anna/skola/PDP/ni_pdp/graf_mro/";
+    if (argc < 1){
+        return 1;
+    }
 
+    std::string dir_path = "../graf_mro/";
+    std::string file_name(argv[1]);
+    int a = std::stoi(argv[2]);
 
-    std::string file_name = "graf_30_10.txt";
-    Graph* graph = load_data(dir_path, file_name, 10);
+    Graph* graph = load_data(dir_path, file_name, a);
     if (!graph){
         return 1;
     }
 
     graph->make_min_edge_cut();
-    std::cout << "solution " << graph->get_best_sol() << std::endl;
-    std::cout << "best price " << graph->get_best_price() << std::endl;
-    std::cout << "total calls " << graph->get_calls() << std::endl;
+    std::cout << "file: " << file_name << std::endl;
+    std::cout << "best price: " << graph->get_best_price() << std::endl;
+    std::cout << "total calls: " << graph->get_calls() << std::endl;
+    std::cout << "solution: " << graph->get_best_sol() << std::endl;
+    graph->print_final_weights(graph->get_best_sol());
+
+
 
 }
