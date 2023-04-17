@@ -44,12 +44,20 @@ std::ostream & operator<< (std::ostream& os, std::vector<int> solution)
 }
 
 //--------------------------------------------------------------------------------------
-struct Message{
+struct Message_state{
     int solution[SIZE];
     int vertex;
     int price;
     int ones;
     int zeros;
+
+    int global_price = std::numeric_limits<int>::max();
+};
+
+//--------------------------------------------------------------------------------------
+struct Message_solution{
+    int solution[SIZE];
+    int price;
 };
 
 //--------------------------------------------------------------------------------------
@@ -84,6 +92,28 @@ public:
 
     std::vector<std::vector<int>> get_edges_w(){
         return edges_w;
+    }
+};
+
+//--------------------------------------------------------------------------------------
+class Solution{
+    int price;
+    std::vector<int> solution;
+
+public:
+    Solution(){}
+
+    Solution(int price, std::vector<int> solution){
+        this->price = price;
+        this->solution = solution;
+    }
+
+    int get_price(){
+        return price;
+    }
+
+    std::vector<int> get_solution(){
+        return solution;
     }
 };
 
@@ -126,21 +156,19 @@ public:
 
     void change_solution(int index, int value, Graph& graph){
         solution[index] = value;
-        price = get_weights_sum(graph);
+        price = get_weights_sum(graph, index, value);
     }
 
-    int get_weights_sum(Graph& graph){
-        int sum = 0;
+    int get_weights_sum(Graph& graph, int index, int value){
+        int sum = price;
         std::vector<std::vector<int>> edges_w = graph.get_edges_w();
 
-        for (int row = 0; row < graph.get_n(); row++){
-            for (int column = row + 1; column < graph.get_n(); column++){
-                if ((solution[row] == 1 and solution[column] == 0)
-                    or (solution[row] == 0 and solution[column] == 1)){
-                    sum += edges_w[row][column];
-                }
+        for (int i = 0; i < solution.size(); i++){
+            if (solution[i] != -1 and solution[i] != value){
+                sum += edges_w[index][i];
             }
         }
+
         return sum;
     }
 };
@@ -169,10 +197,9 @@ class MinEdgeCut{
     Graph graph;
 
 public:
-    MinEdgeCut(Graph& graph){
+    MinEdgeCut(Graph& graph) : graph(graph) {
         this->min_price = std::numeric_limits<int>::max();
         this->calls = 0;
-        this->graph = graph;
     }
 
     std::vector<int> get_best_solution(){
@@ -191,19 +218,15 @@ public:
         int price = state.get_price();
         int sum = price;
         int vertex = state.get_vertex();
-        std::vector<int> solution = state.get_solution();
         int n = graph.get_n();
 
         for (int i = vertex; i < n; i++){
-            solution[i] = 0;
-            int new_price_0 = state.get_weights_sum(graph);
+            int new_price_0 = state.get_weights_sum(graph, i, 0);
 
-            solution[i] = 1;
-            int new_price_1 = state.get_weights_sum(graph);
+            int new_price_1 = state.get_weights_sum(graph, i, 1);
 
             sum += std::min(new_price_0 - price, new_price_1 - price);
 
-            solution[i] = -1;
         }
 
         if (sum > min_price){
@@ -286,6 +309,7 @@ public:
         State state_1 = State(vertex + 1, current.get_price(), current.get_ones() + 1, current.get_zeros(), current.get_solution());
         state_1.change_solution(vertex, 1, graph);
 
+        /*
         if (check_lower_cost_estimation(state_0, min_price)){
             solve_seq(state_0, calls, min_price, best_solution);
         }
@@ -293,12 +317,16 @@ public:
         if (check_lower_cost_estimation(state_1, min_price)){
             solve_seq(state_1, calls, min_price, best_solution);
         }
+         */
+
+        solve_seq(state_0, calls, min_price, best_solution);
+        solve_seq(state_1, calls, min_price, best_solution);
 
     }
 
     // serializace, State obsahuje vector
-    Message Serialize(State & state){
-        struct Message message;
+    Message_state Serialize(State & state){
+        struct Message_state message;
 
         message.vertex = state.get_vertex();
         message.ones = state.get_ones();
@@ -312,21 +340,43 @@ public:
         return message;
     }
 
-    State Unserialize(Message & message){
+    // serializace, Solution obsahuje vector
+    Message_solution Serialize(Solution& solution){
+        struct Message_solution message;
+
+        message.price = solution.get_price();
+
+        for (int i = 0; i < solution.get_solution().size(); i++){
+            message.solution[i] = solution.get_solution()[i];
+        }
+
+        return message;
+    }
+
+    State Unserialize(Message_state & message, int & min_price){
         std::vector<int> solution = init_solution(graph.get_n());
 
         for(int i = 0; i < solution.size(); i++){
             solution[i] = message.solution[i];
         }
 
+        min_price = message.global_price;
+
         return State(message.vertex, message.price, message.ones, message.zeros, solution);
     }
 
+    Solution Unserialize(Message_solution & message){
+        std::vector<int> solution = init_solution(graph.get_n());
 
-    void Master(int process_n){
-        // pocet slave procesu
-        int slave_n = process_n - 1;
+        for(int i = 0; i < solution.size(); i++){
+            solution[i] = message.solution[i];
+        }
 
+        return Solution(message.price, solution);
+    }
+
+
+    void Master(int process_n, int init_states_number, int slave_n){
         // inicializovani root reseni a fronty
         std::vector<int> solution = init_solution(graph.get_n());
         State root = State(0, 0, 0, 0, solution);
@@ -335,7 +385,6 @@ public:
         q.push(root);
 
         // generovani pocatecnich stavu pomoci bfs
-        int init_states_number = slave_n * 10;
         while (true) {
             if (int(q.size()) >= init_states_number) break;
 
@@ -348,8 +397,9 @@ public:
         for (int i = 1; i <= slave_n && !q.empty(); i++) {
             State current = q.front();
             q.pop();
-            struct Message message = Serialize(current);
-            MPI_Send(&message, sizeof(Message), MPI_PACKED, i, TAG_TASK, MPI_COMM_WORLD);
+
+            struct Message_state message = Serialize(current);
+            MPI_Send(&message, sizeof(Message_state), MPI_PACKED, i, TAG_TASK, MPI_COMM_WORLD);
         }
 
         // pokud uz nema stavy ve fronte, posle vsem Slave procesum specialni stav
@@ -357,35 +407,42 @@ public:
         // ceka na odpoved Slave procesu, pamatuje si nejlepsi vysledek
         // po prijmu odpovedi od vsech Slave procesu, vytiskne nejlepsi vysledek a ukonci se
         while(slave_n > 0) {
-            std::vector<int> solution(2);
             MPI_Status status;
-            MPI_Recv(solution.data(), 2, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            struct Message_solution message_solution;
+            MPI_Recv(&message_solution, sizeof(Message_solution), MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
             if(status.MPI_TAG == TAG_DONE) {
-                int price = solution[0];
-                int number = solution[1];
+                Solution solution = Unserialize(message_solution);
+                int slave_price = solution.get_price();
+                std::vector<int> slave_solution = solution.get_solution();
 
-                if(price < min_price) {
-                    min_price = price;
+                // slave nasel lepsi reseni - aktualizuj
+                if(slave_price < min_price) {
+                    min_price = slave_price;
+                    best_solution = slave_solution;
                 }
             }
+
 
             if(q.empty()){
                 int empty_message = 0;
                 MPI_Send(&empty_message, 1, MPI_INT, status.MPI_SOURCE, TAG_KILL, MPI_COMM_WORLD);
                 slave_n--;
             }
+
+            // posli slaveum dalsi stav
             else{
                 State current = q.front();
                 q.pop();
-                struct Message message = Serialize(current);
-                MPI_Send(&message, sizeof(struct Message), MPI_PACKED, status.MPI_SOURCE, TAG_TASK, MPI_COMM_WORLD);
+                struct Message_state message = Serialize(current);
+                message.global_price = min_price;
+                MPI_Send(&message, sizeof(struct Message_state), MPI_PACKED, status.MPI_SOURCE, TAG_TASK, MPI_COMM_WORLD);
             }
         }
     }
 
 
-    void Slave(int threads, int max_states){
+    void Slave(int threads, int init_states_number){
         // ceka na stav zaslany Master procesem
 
         // pomoci vice vlaken tento stav doresi
@@ -399,29 +456,43 @@ public:
         // zasle Slave proces svuj nejlepsi vysledek Master procesu
         // a dany Slave se ukonci
         while(true){
-            struct Message message;
+            struct Message_state message;
             MPI_Status status;
-            MPI_Recv(&message, sizeof(struct Message), MPI_PACKED, MASTER, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+            MPI_Recv(&message, sizeof(struct Message_state), MPI_PACKED, MASTER, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
-            if(status.MPI_TAG == TAG_KILL) return;
+            if(status.MPI_TAG == TAG_KILL) {
+                return;
+            }
 
             if(status.MPI_TAG == TAG_TASK){
-                State current = Unserialize(message);
-                std::queue<State> q = BFS(max_states, current);
+                State current = Unserialize(message, min_price);
+                std::queue<State> q = std::queue<State>();
+                q.push(current);
+
+                while (true) {
+                    if (int(q.size()) >= init_states_number) break;
+
+                    if (q.front().get_vertex() == graph.get_n() - 1) break;
+
+                    bfs(q);
+                }
 
                 std::vector<State> states;
                 while(!q.empty()){
-                    states.emplace_back(move(q.front()));
+                    states.push_back(q.front());
                     q.pop();
                 }
 
                 omp_set_num_threads(threads);
-                #pragma omp parallel for schedule(dynamic) shared(states, min_price, count)
+                #pragma omp parallel for schedule(dynamic) default(none) shared(states, min_price, best_solution, calls, graph)
                 for(auto & state : states){
-                    solve_seq(state, <#initializer#>, <#initializer#>, <#initializer#>, <#initializer#>);
+                    //State &current, int &calls, int &min_price, std::vector<int> &best_solution
+                    solve_seq(state, calls, min_price, best_solution);
                 }
-                std::vector<int> solution = {min_price, count};
-                MPI_Send(solution.data(), 2, MPI_INT, MASTER, TAG_DONE, MPI_COMM_WORLD);
+
+                Solution solution = Solution(min_price, best_solution);
+                struct Message_solution message = Serialize(solution);
+                MPI_Send(&message, sizeof(Message_solution), MPI_PACKED, MASTER, TAG_DONE, MPI_COMM_WORLD);
             }
         }
     }
@@ -436,8 +507,10 @@ public:
         return solution;
     }
 
-    void make_min_edge_cut(int threads, int init_states_number, std::string file_name){
+    void make_min_edge_cut(int threads, int slave_states_number, int master_states_coef, std::string file_name){
 
+        int rank = 0;
+        int processes = 0;
         double s_time = MPI_Wtime();
 
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -446,14 +519,17 @@ public:
         // po prijmu odpovedi od vsech Slave procesu,
         // vytiskne nejlepsi vysledek a ukonci se
         if(rank == MASTER){
-            Master(processes);
+            // pocet slave procesu
+            int slave_n = processes - 1;
+            int master_states_number = slave_n * master_states_coef;
+            Master(processes, master_states_number, slave_n);
             double e_time = MPI_Wtime();
             double time = (e_time - s_time) * 1000;
 
             print_results(file_name, time);
         }
         else{
-            Slave(threads, init_states_number);
+            Slave(threads, slave_states_number);
         }
     }
 
@@ -528,7 +604,8 @@ int main(int argc, char * argv[]) {
     std::string file_name(argv[1]);
     int a = std::stoi(argv[2]);
     int threads = std::stoi(argv[3]);
-    int init_states_number = std::stoi(argv[4]);
+    int slave_states_number = std::stoi(argv[4]);
+    int master_states_coef = std::stoi(argv[5]);
 
     Graph* graph = load_data(dir_path, file_name, a);
     if (!graph){
@@ -536,7 +613,7 @@ int main(int argc, char * argv[]) {
     }
 
     MinEdgeCut min_edge_cut = MinEdgeCut(*graph);
-    min_edge_cut.make_min_edge_cut(threads, init_states_number, file_name);
+    min_edge_cut.make_min_edge_cut(threads, slave_states_number, master_states_coef, file_name);
 
     MPI_Finalize();
 }
